@@ -1,5 +1,12 @@
 import Dagre from '@dagrejs/dagre';
-import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import {
+  forceSimulation,
+  forceLink,
+  forceManyBody,
+  forceX,
+  forceY,
+} from 'd3-force';
+import React, { useCallback, useEffect, useLayoutEffect, useState, useMemo } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -11,43 +18,94 @@ import {
   Edge,
   Handle,
   Position,
+
+  useNodesInitialized,
 } from '@xyflow/react';
 
 import '@xyflow/react/dist/style.css';
+import { collide } from './collide';
 
 interface LayoutOptions {
   direction: 'TB' | 'LR';
 }
 
-const getLayoutedElements = (
-  nodes: Node[],
-  edges: Edge[],
-  options: LayoutOptions
-) => {
-  const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: options.direction });
+const simulation = forceSimulation()
+  .force('charge', forceManyBody().strength(-1000))
+  .force('x', forceX().x(0).strength(0.05))
+  .force('y', forceY().y(0).strength(0.05))
+  .force('collide', collide())
+  .alphaTarget(0.05)
+  .stop();
 
-  edges.forEach((edge) => g.setEdge(edge.source, edge.target));
-  nodes.forEach((node) =>
-    g.setNode(node.id, {
+  type LayoutedElementsReturnType = [boolean, { toggle: () => void; isRunning: () => boolean }];
+
+
+  const useLayoutedElements = (): LayoutedElementsReturnType => {
+  const { getNodes, setNodes, getEdges, fitView } = useReactFlow();
+  const initialized = useNodesInitialized();
+
+  return useMemo(() => {
+    let nodes = getNodes().map((node) => ({
       ...node,
-      width: node.measured?.width ?? 0,
-      height: node.measured?.height ?? 0,
-    })
-  );
+      x: node.position.x,
+      y: node.position.y,
+    }));
+    let edges = getEdges().map((edge) => edge);
+    let running = false;
 
-  Dagre.layout(g);
+    // If React Flow hasn't initialized our nodes with a width and height yet, or
+    // if there are no nodes in the flow, then we can't run the simulation!
+    if (!initialized || nodes.length === 0) return [false, { toggle: () => {}, isRunning: () => false }];
 
-  return {
-    nodes: nodes.map((node) => {
-      const position = g.node(node.id);
-      const x = position.x - (node.measured?.width ?? 0) / 2;
-      const y = position.y - (node.measured?.height ?? 0) / 2;
+    simulation.nodes(nodes).force(
+      'link',
+      forceLink(edges)
+        .id((d: any) => d.id)
+        .strength(0.05)
+        .distance(100),
+    );
 
-      return { ...node, position: { x, y } };
-    }),
-    edges,
-  };
+    // The tick function is called every animation frame while the simulation is
+    // running and progresses the simulation one step forward each time.
+    const tick = () => {
+      getNodes().forEach((node, i) => {
+        const dragging = Boolean(
+          document.querySelector(`[data-id="${node.id}"].dragging`),
+        );
+
+        // Setting the fx/fy properties of a node tells the simulation to "fix"
+        // the node at that position and ignore any forces that would normally
+        // cause it to move.
+        // @ts-ignore
+        nodes[i].fx = dragging ? node.position.x : null;
+        // @ts-ignore
+        nodes[i].fy = dragging ? node.position.y : null;
+      });
+
+      simulation.tick();
+      setNodes(
+        nodes.map((node) => ({ ...node, position: { x: node.x, y: node.y } })),
+      );
+
+      window.requestAnimationFrame(() => {
+        // Give React and React Flow a chance to update and render the new node
+        // positions before we fit the viewport to the new layout.
+        fitView();
+
+        // If the simulation hasn't be stopped, schedule another tick.
+        if (running) tick();
+      });
+    };
+
+    const toggle = () => {
+      running = !running;
+      running && window.requestAnimationFrame(tick);
+    };
+
+    const isRunning = () => running;
+
+    return [true, { toggle, isRunning }];
+  }, [initialized]);
 };
 
 const ToggleNode = ({ id, data }: { id: any, data: any }) => {
@@ -106,6 +164,9 @@ const LayoutFlow: React.FC = () => {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(allEdges);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [centerNode, setCenterNode] = useState<string | null>(null);
+
+
+  const [initialized, { toggle, isRunning }] = useLayoutedElements();
   
   function centerOnNode() {
     if (centerNode) {
@@ -120,15 +181,15 @@ const LayoutFlow: React.FC = () => {
   const onLayout = useCallback(
     (direction: 'TB' | 'LR') => {
       console.log(nodes);
-      const layouted = getLayoutedElements(nodes, edges, { direction });
+      // const layouted = getLayoutedElements(nodes, edges, { direction });
 
-      setNodes([...layouted.nodes]);
-      setEdges([...layouted.edges]);
+      // setNodes([...layouted.nodes]);
+      // setEdges([...layouted.edges]);
 
-      window.requestAnimationFrame(() => {
-        fitView();
-        centerOnNode();
-      });
+      // window.requestAnimationFrame(() => {
+      //   fitView();
+      //   centerOnNode();
+      // });
     },
     [nodes, edges, fitView, setNodes, setEdges]
   );
@@ -207,8 +268,8 @@ const LayoutFlow: React.FC = () => {
             type: 'toggleNode',
             data: { label: node, expandNode: expandNode, },
             hidden: true,
-            position: { x: layerNodeCounter.get(layer)! * 100, y: layer * 100 }
-
+            position: { x: layerNodeCounter.get(layer)! * 100, y: layer * 400  }
+            
           };
 
           layerNodeCounter.set(layer, layerNodeCounter.get(layer)! + 1);
@@ -279,6 +340,9 @@ const LayoutFlow: React.FC = () => {
           <input type="text" name="text"/>
           <button type="submit">Show Node</button>
         </form>
+        {initialized && <button onClick={toggle}>
+            {isRunning() ? 'Stop' : 'Start'} force simulation
+        </button> }
       </Panel>
     </ReactFlow>
   );
@@ -286,7 +350,7 @@ const LayoutFlow: React.FC = () => {
 
 const App: React.FC = () => {
   return (
-    <div style={{ height: 800 }}>
+    <div style={{ height: 1080 }}>
       <ReactFlowProvider>
         <LayoutFlow />
       </ReactFlowProvider>
