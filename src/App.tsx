@@ -20,6 +20,7 @@ import {
   Position,
 
   useNodesInitialized,
+  MarkerType,
 } from '@xyflow/react';
 
 import '@xyflow/react/dist/style.css';
@@ -37,10 +38,25 @@ const simulation = forceSimulation()
   .alphaTarget(0.05)
   .stop();
 
-  type LayoutedElementsReturnType = [boolean, { toggle: () => void; isRunning: () => boolean }];
+type LayoutedElementsReturnType = [boolean, { toggle: () => void; isRunning: () => boolean }];
+
+const handleOrphans = (nodes: Node[], edges: Edge[]) => {
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const edgeIds = new Set(edges.filter((edge) => !edge.hidden).flatMap((edge) => [edge.source, edge.target]));
+
+  const orphanedNodes = nodes.filter((node) => !edgeIds.has(node.id));
+
+  return nodes.map((node) => {
+    if (orphanedNodes.includes(node)) {
+      return { ...node, hidden: true };
+    } else {
+      return { ...node, hidden: false };
+    }
+  });
+}
 
 
-  const useLayoutedElements = (): LayoutedElementsReturnType => {
+const useLayoutedElements = (): LayoutedElementsReturnType => {
   const { getNodes, setNodes, getEdges, fitView } = useReactFlow();
   const initialized = useNodesInitialized();
 
@@ -55,7 +71,7 @@ const simulation = forceSimulation()
 
     // If React Flow hasn't initialized our nodes with a width and height yet, or
     // if there are no nodes in the flow, then we can't run the simulation!
-    if (!initialized || nodes.length === 0) return [false, { toggle: () => {}, isRunning: () => false }];
+    if (!initialized || nodes.length === 0) return [false, { toggle: () => { }, isRunning: () => false }];
 
     simulation.nodes(nodes).force(
       'link',
@@ -135,9 +151,9 @@ const ToggleNode = ({ id, data }: { id: any, data: any }) => {
     <div>
       <Handle type="target" position={Position.Top} />
       <div>
-      <label style={{ color: colors.get(featureType) }}>{data.label}</label>
-      {/* <button onClick={toggleEdges}>Toggle Edges</button> */}
-      <button onClick={() => data.expandNode(id)}>Expand Node</button>
+        <label style={{ color: colors.get(featureType) }}>{data.label}</label>
+        {/* <button onClick={toggleEdges}>Toggle Edges</button> */}
+        <button onClick={() => data.expandNode(id)}>Expand Node</button>
       </div>
       <Handle type="source" position={Position.Bottom} />
     </div>
@@ -164,10 +180,12 @@ const LayoutFlow: React.FC = () => {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(allEdges);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [centerNode, setCenterNode] = useState<string | null>(null);
+  const [ieThreshold, setIeThreshold] = useState<number>(0.5);
+  const [minWeight, setMinWeight] = useState<number>(0);
 
 
   const [initialized, { toggle, isRunning }] = useLayoutedElements();
-  
+
   function centerOnNode() {
     if (centerNode) {
       const node = reactFlow.getNode(centerNode);
@@ -204,7 +222,7 @@ const LayoutFlow: React.FC = () => {
           nodesToActivate.add(e.target);
           return { ...e, hidden: false };
         } else {
-          return { ...e};
+          return { ...e };
         }
       })
       setEdges(newEdges.filter((edge) => !edge.hidden));
@@ -221,7 +239,7 @@ const LayoutFlow: React.FC = () => {
       });
       setNodes(newNodes.filter((node) => !node.hidden));
       return newNodes;
-    } );
+    });
     setCenterNode(node);
   }
 
@@ -238,12 +256,25 @@ const LayoutFlow: React.FC = () => {
 
         console.log(graph);
 
-        const newEdges = graph.map((edge: any) => {
+
+        const maxWeight = Math.max(...graph.map((edge: any) => edge[0]));
+
+        let newEdges = graph.map((edge: any) => {
           const source = nodeKeysToName(edge[1]);
           const target = nodeKeysToName(edge[2]);
 
-          return { id: source + "-" + target, source: source, target: target, animated: false, hidden: true };
+          return {
+            id: source + "-" + target, source: source, target: target,
+            animated: false, hidden: true,
+            data: { weight: edge[0] },
+            // style: {strokeWidth: 3 * (Math.log(edge[0]) - Math.log(minWeight)) / (Math.log(maxWeight) - Math.log(minWeight))} }
+            style: { strokeWidth: 3 },
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+            },
+          }
         });
+
 
         const allNewNodes = [...new Set(newEdges.flatMap((edge: any) => [edge.source, edge.target]))];
 
@@ -268,8 +299,7 @@ const LayoutFlow: React.FC = () => {
             type: 'toggleNode',
             data: { label: node, expandNode: expandNode, },
             hidden: true,
-            position: { x: layerNodeCounter.get(layer)! * 100, y: layer * 400  }
-            
+            position: { x: layerNodeCounter.get(layer)! * 100, y: layer * 400 },
           };
 
           layerNodeCounter.set(layer, layerNodeCounter.get(layer)! + 1);
@@ -277,9 +307,19 @@ const LayoutFlow: React.FC = () => {
           return nodeData
         });
 
+        const threshold = graph[4 * newNodes.length][0];
+
+        newEdges = newEdges.map((edge: any) => {
+          return {
+            ...edge,
+            style: { strokeWidth: 10 * (Math.log(edge.data.weight) - Math.log(threshold)) / (Math.log(maxWeight) - Math.log(threshold)) }
+          }
+        });
+
         setAllNodes(newNodes);
         setAllEdges(newEdges);
-        setNodes(newNodes.filter((node) => !node.hidden).map((node) => { 
+
+        setNodes(newNodes.filter((node) => !node.hidden).map((node) => {
           const existingNode = reactFlow.getNode(node.id);
           if (existingNode) {
             return existingNode;
@@ -289,6 +329,8 @@ const LayoutFlow: React.FC = () => {
         setEdges(newEdges.filter((edge: any) => !edge.hidden));
 
         expandNode(newNodes[0]!.id);
+        setIeThreshold(threshold);
+        setMinWeight(threshold);
       };
       reader.readAsText(file);
     }
@@ -310,6 +352,23 @@ const LayoutFlow: React.FC = () => {
   useEffect(() => {
     centerOnNode();
   }, [centerNode]);
+
+  useEffect(() => {
+    setEdges((edges) => {
+      const newEdges = edges.map((edge: any) => {
+        if (edge.data.weight < ieThreshold) {
+          return { ...edge, hidden: true };
+        } else {
+          return { ...edge, hidden: false };
+        }
+      });
+
+      setNodes((nodes) => {
+        return handleOrphans(nodes, newEdges);
+      });
+      return newEdges;
+    });
+  }, [ieThreshold]);
 
   // useLayoutEffect(() => {
   //   if (centerNode) {
@@ -337,12 +396,15 @@ const LayoutFlow: React.FC = () => {
           <button type="submit">Load Graph</button>
         </form>
         <form onSubmit={handleNodeSelect}>
-          <input type="text" name="text"/>
+          <input type="text" name="text" />
           <button type="submit">Show Node</button>
         </form>
         {initialized && <button onClick={toggle}>
-            {isRunning() ? 'Stop' : 'Start'} force simulation
-        </button> }
+          {isRunning() ? 'Stop' : 'Start'} force simulation
+        </button>}
+        <form>
+          <input type="number" value={ieThreshold} onChange={(event) => setIeThreshold(parseFloat(event.target.value))} step="0.0000001" />
+        </form>
       </Panel>
     </ReactFlow>
   );
