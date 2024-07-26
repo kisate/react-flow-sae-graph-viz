@@ -23,12 +23,18 @@ import {
   MarkerType,
 } from '@xyflow/react';
 
+import { sugiyama, decrossTwoLayer, coordCenter, layeringSimplex, graphStratify } from 'd3-dag';
+
+
 import '@xyflow/react/dist/style.css';
 import { collide } from './collide';
+
+import './App.css';
 
 interface LayoutOptions {
   direction: 'TB' | 'LR';
 }
+
 
 const simulation = forceSimulation()
   .force('charge', forceManyBody().strength(-1000))
@@ -38,11 +44,10 @@ const simulation = forceSimulation()
   .alphaTarget(0.05)
   .stop();
 
-type LayoutedElementsReturnType = [boolean, { toggle: () => void; isRunning: () => boolean }];
-
 const handleOrphans = (nodes: Node[], edges: Edge[]) => {
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const edgeIds = new Set(edges.filter((edge) => !edge.hidden).flatMap((edge) => [edge.source, edge.target]));
+  // @ts-ignore
+  const edgeIds = new Set(edges.filter((edge) => !edge.hidden && !edge.underThreshold).flatMap((edge) => [edge.source, edge.target]));
 
   const orphanedNodes = nodes.filter((node) => !edgeIds.has(node.id));
 
@@ -55,73 +60,64 @@ const handleOrphans = (nodes: Node[], edges: Edge[]) => {
   });
 }
 
+const getLayoutedElements = (
+  nodes: Node[],
+  edges: Edge[],
+  options: LayoutOptions
+) => {
+  // Prepare the input for d3-dag
+  const nodeParents = new Map<string, string[]>();
+  edges.forEach((edge) => {
+    if (!nodeParents.has(edge.target)) {
+      nodeParents.set(edge.target, []);
+    }
+    if (!nodeParents.has(edge.source)) {
+      nodeParents.set(edge.source, []);
+    }
+    nodeParents.get(edge.target)!.push(edge.source);
+  } );
 
-const useLayoutedElements = (): LayoutedElementsReturnType => {
-  const { getNodes, setNodes, getEdges, fitView } = useReactFlow();
-  const initialized = useNodesInitialized();
+  const dagNodes = Array.from(nodeParents.entries()).map(([id, parents]) => {
+    if (parents.length === 0) {
+      return { id:id };
+    }
+    return { id:id, parentIds:parents };
+  } );
 
-  return useMemo(() => {
-    let nodes = getNodes().map((node) => ({
-      ...node,
-      x: node.position.x,
-      y: node.position.y,
-    }));
-    let edges = getEdges().map((edge) => edge);
-    let running = false;
+  // Create the dag
+  const stratify = graphStratify()
 
-    // If React Flow hasn't initialized our nodes with a width and height yet, or
-    // if there are no nodes in the flow, then we can't run the simulation!
-    if (!initialized || nodes.length === 0) return [false, { toggle: () => { }, isRunning: () => false }];
+  const dag = stratify(dagNodes);
 
-    simulation.nodes(nodes).force(
-      'link',
-      forceLink(edges)
-        .id((d: any) => d.id)
-        .strength(0.05)
-        .distance(100),
-    );
+  // Apply Sugiyama layout
+  const layout = sugiyama()
+    .layering(layeringSimplex())
+    .decross(decrossTwoLayer())
+    .coord(coordCenter());
 
-    // The tick function is called every animation frame while the simulation is
-    // running and progresses the simulation one step forward each time.
-    const tick = () => {
-      getNodes().forEach((node, i) => {
-        const dragging = Boolean(
-          document.querySelector(`[data-id="${node.id}"].dragging`),
-        );
+  layout(dag);
 
-        // Setting the fx/fy properties of a node tells the simulation to "fix"
-        // the node at that position and ignore any forces that would normally
-        // cause it to move.
-        // @ts-ignore
-        nodes[i].fx = dragging ? node.position.x : null;
-        // @ts-ignore
-        nodes[i].fy = dragging ? node.position.y : null;
-      });
+  const scale = 75;
 
-      simulation.tick();
-      setNodes(
-        nodes.map((node) => ({ ...node, position: { x: node.x, y: node.y } })),
-      );
+  // Extract the layout information
+  const nodeMap = new Map();
+  for (const node of dag.nodes()) {
+    console.log(node)
+    nodeMap.set(node.data.id, { x: node.x * scale, y: node.y * scale });
+  }
 
-      window.requestAnimationFrame(() => {
-        // Give React and React Flow a chance to update and render the new node
-        // positions before we fit the viewport to the new layout.
-        fitView();
+  console.log(nodeMap);
 
-        // If the simulation hasn't be stopped, schedule another tick.
-        if (running) tick();
-      });
-    };
+  return {
+    nodes: nodes.map((node) => {
+      const position = nodeMap.get(node.id);
+      const x = position.x - (node.measured?.width ?? 0) / 2;
+      const y = position.y - (node.measured?.height ?? 0) / 2;
 
-    const toggle = () => {
-      running = !running;
-      running && window.requestAnimationFrame(tick);
-    };
-
-    const isRunning = () => running;
-
-    return [true, { toggle, isRunning }];
-  }, [initialized]);
+      return { ...node, position: { x, y } };
+    }),
+    edges,
+  };
 };
 
 const ToggleNode = ({ id, data }: { id: any, data: any }) => {
@@ -150,7 +146,7 @@ const ToggleNode = ({ id, data }: { id: any, data: any }) => {
   return (
     <div>
       <Handle type="target" position={Position.Top} />
-      <div>
+      <div className='node-insides'>
         <label style={{ color: colors.get(featureType) }}>{data.label}</label>
         {/* <button onClick={toggleEdges}>Toggle Edges</button> */}
         <button onClick={() => data.expandNode(id)}>Expand Node</button>
@@ -183,9 +179,6 @@ const LayoutFlow: React.FC = () => {
   const [ieThreshold, setIeThreshold] = useState<number>(0.5);
   const [minWeight, setMinWeight] = useState<number>(0);
 
-
-  const [initialized, { toggle, isRunning }] = useLayoutedElements();
-
   function centerOnNode() {
     if (centerNode) {
       const node = reactFlow.getNode(centerNode);
@@ -199,15 +192,15 @@ const LayoutFlow: React.FC = () => {
   const onLayout = useCallback(
     (direction: 'TB' | 'LR') => {
       console.log(nodes);
-      // const layouted = getLayoutedElements(nodes, edges, { direction });
+      const layouted = getLayoutedElements(nodes, edges, { direction });
 
-      // setNodes([...layouted.nodes]);
-      // setEdges([...layouted.edges]);
+      setNodes([...layouted.nodes]);
+      setEdges([...layouted.edges]);
 
-      // window.requestAnimationFrame(() => {
-      //   fitView();
-      //   centerOnNode();
-      // });
+      window.requestAnimationFrame(() => {
+        fitView();
+        centerOnNode();
+      });
     },
     [nodes, edges, fitView, setNodes, setEdges]
   );
@@ -265,7 +258,8 @@ const LayoutFlow: React.FC = () => {
 
           return {
             id: source + "-" + target, source: source, target: target,
-            animated: false, hidden: true,
+            animated: false, hidden: true, 
+            underThreshold: false,
             data: { weight: edge[0] },
             // style: {strokeWidth: 3 * (Math.log(edge[0]) - Math.log(minWeight)) / (Math.log(maxWeight) - Math.log(minWeight))} }
             style: { strokeWidth: 3 },
@@ -354,17 +348,18 @@ const LayoutFlow: React.FC = () => {
   }, [centerNode]);
 
   useEffect(() => {
-    setEdges((edges) => {
+    setAllEdges((edges) => {
       const newEdges = edges.map((edge: any) => {
-        if (edge.data.weight < ieThreshold) {
-          return { ...edge, hidden: true };
-        } else {
-          return { ...edge, hidden: false };
-        }
+        return {...edge, underThreshold: edge.data.weight < ieThreshold};
       });
 
-      setNodes((nodes) => {
-        return handleOrphans(nodes, newEdges);
+      setEdges(newEdges.filter((edge) => !edge.hidden && !edge.underThreshold));
+
+      setAllNodes((nodes) => {
+        const newNodes = handleOrphans(nodes, newEdges);
+        
+        setNodes(newNodes.filter((node) => !node.hidden));
+        return newNodes;
       });
       return newEdges;
     });
@@ -399,9 +394,6 @@ const LayoutFlow: React.FC = () => {
           <input type="text" name="text" />
           <button type="submit">Show Node</button>
         </form>
-        {initialized && <button onClick={toggle}>
-          {isRunning() ? 'Stop' : 'Start'} force simulation
-        </button>}
         <form>
           <input type="number" value={ieThreshold} onChange={(event) => setIeThreshold(parseFloat(event.target.value))} step="0.0000001" />
         </form>
