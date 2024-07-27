@@ -117,7 +117,7 @@ const LayoutFlow: React.FC = () => {
   const [minWeight, setMinWeight] = useState<number>(0);
   const [layoutUpdated, setLayoutUpdated] = useState(true);
   const [centered, setCentered] = useState(true);
-  const [shouldCenter, setShouldCenter] = useState(true);
+  const [maxWeight, setMaxWeight] = useState(0);
 
   function centerOnNode() {
     if (centerNode) {
@@ -261,6 +261,7 @@ const LayoutFlow: React.FC = () => {
 
         setIeThreshold(threshold);
         setMinWeight(threshold);
+        setMaxWeight(maxWeight);
         expandNode(newNodes[0]!.id);
       };
       reader.readAsText(file);
@@ -284,7 +285,11 @@ const LayoutFlow: React.FC = () => {
   useEffect(() => {
     setAllEdges((edges) => {
       const newEdges = edges.map((edge: any) => {
-        return { ...edge, underThreshold: edge.data.weight < ieThreshold };
+        return { 
+          ...edge, 
+          underThreshold: edge.data.weight < ieThreshold,
+          style: { strokeWidth: 10 * (Math.log(edge.data.weight) - Math.log(ieThreshold)) / (Math.log(maxWeight) - Math.log(ieThreshold)) }
+        };
       });
 
       setEdges(newEdges.filter((edge) => !edge.hidden && !edge.underThreshold));

@@ -137,7 +137,7 @@ export const ToggleNode = ({ id, data }: { id: any, data: any }) => {
           {/* <button onClick={toggleEdges}>Toggle Edges</button> */}
           <button onClick={() => data.expandNode(id)}>Expand Node</button>
           <button onClick={loadExplanation}>Get Explanation</button>
-          {explanation && explanation.map((exp: string) => <label style={{color: "black", fontSize: "0.8rem"}}>{exp}</label>)}
+          {explanation && explanation.map((exp: string, i: number) => <label key={i} style={{color: "black", fontSize: "0.8rem"}}>{exp}</label>)}
         </div>
         <Handle type="source" position={Position.Bottom} />
       </div>
