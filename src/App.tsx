@@ -1,11 +1,3 @@
-import Dagre from '@dagrejs/dagre';
-import {
-  forceSimulation,
-  forceLink,
-  forceManyBody,
-  forceX,
-  forceY,
-} from 'd3-force';
 import React, { useCallback, useEffect, useLayoutEffect, useState, useMemo } from 'react';
 import {
   ReactFlow,
@@ -18,8 +10,6 @@ import {
   Edge,
   Handle,
   Position,
-
-  useNodesInitialized,
   MarkerType,
 } from '@xyflow/react';
 
@@ -27,25 +17,12 @@ import { sugiyama, decrossTwoLayer, coordCenter, layeringSimplex, graphStratify 
 
 
 import '@xyflow/react/dist/style.css';
-import { collide } from './collide';
 
 import './App.css';
+import { ToggleNode } from './Node';
 
-interface LayoutOptions {
-  direction: 'TB' | 'LR';
-}
-
-
-const simulation = forceSimulation()
-  .force('charge', forceManyBody().strength(-1000))
-  .force('x', forceX().x(0).strength(0.05))
-  .force('y', forceY().y(0).strength(0.05))
-  .force('collide', collide())
-  .alphaTarget(0.05)
-  .stop();
 
 const handleOrphans = (nodes: Node[], edges: Edge[]) => {
-  const nodeIds = new Set(nodes.map((node) => node.id));
   // @ts-ignore
   const edgeIds = new Set(edges.filter((edge) => !edge.hidden && !edge.underThreshold).flatMap((edge) => [edge.source, edge.target]));
 
@@ -62,8 +39,7 @@ const handleOrphans = (nodes: Node[], edges: Edge[]) => {
 
 const getLayoutedElements = (
   nodes: Node[],
-  edges: Edge[],
-  options: LayoutOptions
+  edges: Edge[]
 ) => {
   // Prepare the input for d3-dag
   const nodeParents = new Map<string, string[]>();
@@ -75,14 +51,14 @@ const getLayoutedElements = (
       nodeParents.set(edge.source, []);
     }
     nodeParents.get(edge.target)!.push(edge.source);
-  } );
+  });
 
   const dagNodes = Array.from(nodeParents.entries()).map(([id, parents]) => {
     if (parents.length === 0) {
-      return { id:id };
+      return { id: id };
     }
-    return { id:id, parentIds:parents };
-  } );
+    return { id: id, parentIds: parents };
+  });
 
   // Create the dag
   const stratify = graphStratify()
@@ -97,16 +73,13 @@ const getLayoutedElements = (
 
   layout(dag);
 
-  const scale = 75;
+  const scale = 100;
 
   // Extract the layout information
   const nodeMap = new Map();
   for (const node of dag.nodes()) {
-    console.log(node)
     nodeMap.set(node.data.id, { x: node.x * scale, y: node.y * scale });
   }
-
-  console.log(nodeMap);
 
   return {
     nodes: nodes.map((node) => {
@@ -118,42 +91,6 @@ const getLayoutedElements = (
     }),
     edges,
   };
-};
-
-const ToggleNode = ({ id, data }: { id: any, data: any }) => {
-  const { setNodes, setEdges } = useReactFlow();
-
-  const toggleEdges = () => {
-    setEdges((eds) =>
-      eds.map((edge) => {
-        if (edge.source === id) {
-          return { ...edge, hidden: !edge.hidden };
-        }
-        return edge;
-      })
-    );
-  };
-
-  const featureType = data.label.split(':')[0][0];
-  const colors = new Map([
-    ["e", "red"],
-    ["r", "green"],
-    ["a", "blue"],
-    ["t", "orange"],
-  ]);
-
-
-  return (
-    <div>
-      <Handle type="target" position={Position.Top} />
-      <div className='node-insides'>
-        <label style={{ color: colors.get(featureType) }}>{data.label}</label>
-        {/* <button onClick={toggleEdges}>Toggle Edges</button> */}
-        <button onClick={() => data.expandNode(id)}>Expand Node</button>
-      </div>
-      <Handle type="source" position={Position.Bottom} />
-    </div>
-  );
 };
 
 const nodeTypes = {
@@ -178,28 +115,32 @@ const LayoutFlow: React.FC = () => {
   const [centerNode, setCenterNode] = useState<string | null>(null);
   const [ieThreshold, setIeThreshold] = useState<number>(0.5);
   const [minWeight, setMinWeight] = useState<number>(0);
+  const [layoutUpdated, setLayoutUpdated] = useState(true);
+  const [centered, setCentered] = useState(true);
+  const [shouldCenter, setShouldCenter] = useState(true);
 
   function centerOnNode() {
     if (centerNode) {
-      const node = reactFlow.getNode(centerNode);
+      const node = nodes.find((node) => node.id === centerNode);
       if (node) {
         const viewport = reactFlow.getViewport();
+        console.log("!!!!!")
+        console.log(node);
         reactFlow.setCenter(node.position.x, node.position.y, { zoom: viewport.zoom });
       }
     }
   }
 
   const onLayout = useCallback(
-    (direction: 'TB' | 'LR') => {
+    () => {
       console.log(nodes);
-      const layouted = getLayoutedElements(nodes, edges, { direction });
+      const layouted = getLayoutedElements(nodes, edges);
 
       setNodes([...layouted.nodes]);
       setEdges([...layouted.edges]);
 
       window.requestAnimationFrame(() => {
         fitView();
-        centerOnNode();
       });
     },
     [nodes, edges, fitView, setNodes, setEdges]
@@ -207,32 +148,29 @@ const LayoutFlow: React.FC = () => {
 
   const expandNode = (node: string) => {
     console.log(node);
-    const nodesToActivate = new Set<string>();
     setAllEdges((edges) => {
       const newEdges = edges.map((e) => {
         if (e.source === node || e.target === node) {
-          nodesToActivate.add(e.source);
-          nodesToActivate.add(e.target);
           return { ...e, hidden: false };
         } else {
           return { ...e };
         }
       })
-      setEdges(newEdges.filter((edge) => !edge.hidden));
+
+
+      // @ts-ignore
+      setEdges(newEdges.filter((edge) => !edge.hidden && !edge.underThreshold));
+
+      setAllNodes((nodes) => {
+        let newNodes = handleOrphans(nodes, newEdges);
+        setNodes(newNodes.filter((node) => !node.hidden));
+        setLayoutUpdated(false);
+        return newNodes;
+      });
+
       return newEdges;
     });
 
-    setAllNodes((nodes) => {
-      const newNodes = nodes.map((n) => {
-        if (nodesToActivate.has(n.id)) {
-          return { ...n, hidden: false };
-        } else {
-          return { ...n };
-        }
-      });
-      setNodes(newNodes.filter((node) => !node.hidden));
-      return newNodes;
-    });
     setCenterNode(node);
   }
 
@@ -258,10 +196,9 @@ const LayoutFlow: React.FC = () => {
 
           return {
             id: source + "-" + target, source: source, target: target,
-            animated: false, hidden: true, 
+            animated: false, hidden: true,
             underThreshold: false,
             data: { weight: edge[0] },
-            // style: {strokeWidth: 3 * (Math.log(edge[0]) - Math.log(minWeight)) / (Math.log(maxWeight) - Math.log(minWeight))} }
             style: { strokeWidth: 3 },
             markerEnd: {
               type: MarkerType.ArrowClosed,
@@ -322,9 +259,9 @@ const LayoutFlow: React.FC = () => {
         }));
         setEdges(newEdges.filter((edge: any) => !edge.hidden));
 
-        expandNode(newNodes[0]!.id);
         setIeThreshold(threshold);
         setMinWeight(threshold);
+        expandNode(newNodes[0]!.id);
       };
       reader.readAsText(file);
     }
@@ -335,35 +272,56 @@ const LayoutFlow: React.FC = () => {
     const data = new FormData(event.target);
     const node = data.get('text') as string | null;
     setSelectedNode(node);
-
-
     if (node) {
       expandNode(node);
     }
-
   }
 
-  useEffect(() => {
-    centerOnNode();
-  }, [centerNode]);
+  // useEffect(() => {
+  //   centerOnNode();
+  // }, [centerNode]);
 
   useEffect(() => {
     setAllEdges((edges) => {
       const newEdges = edges.map((edge: any) => {
-        return {...edge, underThreshold: edge.data.weight < ieThreshold};
+        return { ...edge, underThreshold: edge.data.weight < ieThreshold };
       });
 
       setEdges(newEdges.filter((edge) => !edge.hidden && !edge.underThreshold));
 
       setAllNodes((nodes) => {
         const newNodes = handleOrphans(nodes, newEdges);
-        
-        setNodes(newNodes.filter((node) => !node.hidden));
+
+        setNodes(newNodes.filter((node) => !node.hidden).map((node) => {
+          const existingNode = reactFlow.getNode(node.id);
+          if (existingNode) {
+            return existingNode;
+          }
+          return node;
+        }));
         return newNodes;
       });
+      // setLayoutUpdated(false);
+      // setShouldCenter(false);
       return newEdges;
     });
   }, [ieThreshold]);
+
+  useEffect(() => {
+    if (!layoutUpdated) {
+      onLayout();
+      // centerOnNode();
+      setLayoutUpdated(true);
+      setCentered(false);
+    }
+  } , [nodes, layoutUpdated]);
+
+  useEffect(() => {
+    if (!centered) {
+      centerOnNode();
+      setCentered(true);
+    }
+  }, [nodes, centered]);
 
   // useLayoutEffect(() => {
   //   if (centerNode) {
@@ -384,8 +342,9 @@ const LayoutFlow: React.FC = () => {
       nodeTypes={nodeTypes}
     >
       <Panel position="top-right">
-        <button onClick={() => onLayout('TB')}>vertical layout</button>
-        <button onClick={() => onLayout('LR')}>horizontal layout</button>
+        <button onClick={() => {
+          setLayoutUpdated(false);
+          }}>layout</button>
         <form onSubmit={handleSubmit}>
           <input type="file" name="file" accept=".json" />
           <button type="submit">Load Graph</button>
@@ -397,6 +356,7 @@ const LayoutFlow: React.FC = () => {
         <form>
           <input type="number" value={ieThreshold} onChange={(event) => setIeThreshold(parseFloat(event.target.value))} step="0.0000001" />
         </form>
+        <button onClick={centerOnNode}>Center on Node</button>
       </Panel>
     </ReactFlow>
   );
