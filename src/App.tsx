@@ -278,10 +278,18 @@ const LayoutFlow: React.FC = () => {
     }
   }
 
-  // useEffect(() => {
-  //   centerOnNode();
-  // }, [centerNode]);
-
+  const handleSearchNode = (event: any) => {
+    event.preventDefault();
+    const data = new FormData(event.target);
+    const node = data.get('text') as string | null;
+    const foundNode = nodes.find((n) => n.id === node);
+    console.log(foundNode);
+    if (foundNode) {
+      setCenterNode(node);
+      setCentered(false);
+    }
+  }
+  
   useEffect(() => {
     setAllEdges((edges) => {
       const newEdges = edges.map((edge: any) => {
@@ -362,6 +370,10 @@ const LayoutFlow: React.FC = () => {
           <input type="number" value={ieThreshold} onChange={(event) => setIeThreshold(parseFloat(event.target.value))} step="0.0000001" />
         </form>
         <button onClick={centerOnNode}>Center on Node</button>
+        <form onSubmit={handleSearchNode}>
+          <input type="text" name="text" />
+          <button type="submit">Search Node</button>
+        </form>
       </Panel>
     </ReactFlow>
   );
@@ -369,7 +381,7 @@ const LayoutFlow: React.FC = () => {
 
 const App: React.FC = () => {
   return (
-    <div style={{ height: 1080 }}>
+    <div style={{ height: "100vh" }}>
       <ReactFlowProvider>
         <LayoutFlow />
       </ReactFlowProvider>
