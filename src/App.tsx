@@ -13,8 +13,7 @@ import {
   MarkerType,
 } from '@xyflow/react';
 
-import { sugiyama, decrossTwoLayer, coordCenter, layeringSimplex, graphStratify } from 'd3-dag';
-
+import { getLayoutedElements } from './layout';
 
 import '@xyflow/react/dist/style.css';
 
@@ -37,61 +36,6 @@ const handleOrphans = (nodes: Node[], edges: Edge[]) => {
   });
 }
 
-const getLayoutedElements = (
-  nodes: Node[],
-  edges: Edge[]
-) => {
-  // Prepare the input for d3-dag
-  const nodeParents = new Map<string, string[]>();
-  edges.forEach((edge) => {
-    if (!nodeParents.has(edge.target)) {
-      nodeParents.set(edge.target, []);
-    }
-    if (!nodeParents.has(edge.source)) {
-      nodeParents.set(edge.source, []);
-    }
-    nodeParents.get(edge.target)!.push(edge.source);
-  });
-
-  const dagNodes = Array.from(nodeParents.entries()).map(([id, parents]) => {
-    if (parents.length === 0) {
-      return { id: id };
-    }
-    return { id: id, parentIds: parents };
-  });
-
-  // Create the dag
-  const stratify = graphStratify()
-
-  const dag = stratify(dagNodes);
-
-  // Apply Sugiyama layout
-  const layout = sugiyama()
-    .layering(layeringSimplex())
-    .decross(decrossTwoLayer())
-    .coord(coordCenter());
-
-  layout(dag);
-
-  const scale = 100;
-
-  // Extract the layout information
-  const nodeMap = new Map();
-  for (const node of dag.nodes()) {
-    nodeMap.set(node.data.id, { x: node.x * scale, y: node.y * scale });
-  }
-
-  return {
-    nodes: nodes.map((node) => {
-      const position = nodeMap.get(node.id);
-      const x = position.x - (node.measured?.width ?? 0) / 2;
-      const y = position.y - (node.measured?.height ?? 0) / 2;
-
-      return { ...node, position: { x, y } };
-    }),
-    edges,
-  };
-};
 
 const nodeTypes = {
   toggleNode: ToggleNode,
@@ -104,20 +48,18 @@ function nodeKeysToName(keys: string[]) {
 const LayoutFlow: React.FC = () => {
   const { fitView } = useReactFlow();
   const reactFlow = useReactFlow();
-  const { setViewport, zoomIn, zoomOut } = useReactFlow();
 
   const [allNodes, setAllNodes] = useState<Node[]>([]);
   const [allEdges, setAllEdges] = useState<Edge[]>([]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(allNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(allEdges);
-  const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [centerNode, setCenterNode] = useState<string | null>(null);
   const [ieThreshold, setIeThreshold] = useState<number>(0.5);
-  const [minWeight, setMinWeight] = useState<number>(0);
   const [layoutUpdated, setLayoutUpdated] = useState(true);
   const [centered, setCentered] = useState(true);
   const [maxWeight, setMaxWeight] = useState(0);
+  const [nodeIEs, setNodeIEs] = useState(new Map<string, number>());
 
   function centerOnNode() {
     if (centerNode) {
@@ -183,7 +125,16 @@ const LayoutFlow: React.FC = () => {
       const reader = new FileReader();
       reader.onload = (event: any) => {
         const content = event.target.result;
-        const graph = JSON.parse(content);
+        const parsedJSON = JSON.parse(content);
+
+        const graph = parsedJSON.edges;
+        const newNodeIEs = new Map<string, number>(parsedJSON.nodes.map((entry: any) => {
+          const nodeId = nodeKeysToName(entry.slice(0, 4));
+          const ie = entry[4];
+          return [nodeId, ie];
+        }));
+
+        setNodeIEs(newNodeIEs);
 
         console.log(graph);
 
@@ -200,6 +151,7 @@ const LayoutFlow: React.FC = () => {
             underThreshold: false,
             data: { weight: edge[0] },
             style: { strokeWidth: 3 },
+            type: 'smoothstep',
             markerEnd: {
               type: MarkerType.ArrowClosed,
             },
@@ -228,7 +180,7 @@ const LayoutFlow: React.FC = () => {
           const nodeData = {
             id: node,
             type: 'toggleNode',
-            data: { label: node, expandNode: expandNode, },
+            data: { label: node, expandNode: expandNode, ie: newNodeIEs.get(node) || 0 },
             hidden: true,
             position: { x: layerNodeCounter.get(layer)! * 100, y: layer * 400 },
           };
@@ -238,7 +190,11 @@ const LayoutFlow: React.FC = () => {
           return nodeData
         });
 
-        const threshold = graph[4 * newNodes.length][0];
+        console.log(newNodes);
+
+
+        console.log(graph);
+        const threshold = graph[3 * newNodes.length][0];
 
         newEdges = newEdges.map((edge: any) => {
           return {
@@ -260,9 +216,13 @@ const LayoutFlow: React.FC = () => {
         setEdges(newEdges.filter((edge: any) => !edge.hidden));
 
         setIeThreshold(threshold);
-        setMinWeight(threshold);
         setMaxWeight(maxWeight);
-        expandNode(newNodes[0]!.id);
+
+        const firstNode = parsedJSON.nodes.find((entry: any) => entry[0][0] != "e");
+
+        console.log(firstNode);
+
+        expandNode(nodeKeysToName(firstNode.slice(0, 4)));
       };
       reader.readAsText(file);
     }
@@ -272,7 +232,6 @@ const LayoutFlow: React.FC = () => {
     event.preventDefault();
     const data = new FormData(event.target);
     const node = data.get('text') as string | null;
-    setSelectedNode(node);
     if (node) {
       expandNode(node);
     }
@@ -335,15 +294,6 @@ const LayoutFlow: React.FC = () => {
       setCentered(true);
     }
   }, [nodes, centered]);
-
-  // useLayoutEffect(() => {
-  //   if (centerNode) {
-  //     const node = reactFlow.getNode(centerNode);
-  //     if (node) {
-  //       reactFlow.setCenter(node.position.x, node.position.y);
-  //     }
-  //   }
-  // } , [centerNode]);
 
   return (
     <ReactFlow

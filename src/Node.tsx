@@ -1,7 +1,8 @@
 import { Handle, Position, useReactFlow, useUpdateNodeInternals } from "@xyflow/react";
 import { useState } from "react";
-import build_url from "./utils";
+import { build_url }  from "./utils";
 import axios from "axios";
+import { build_dashboard_url } from "./utils";
 
 function calculate_selection_metric(scale_tuning: any, probe_layer: number, alpha: number, required_scale: number): number[] {
     const normalized_ce = normalize(scale_tuning.crossents);
@@ -87,10 +88,62 @@ function handleRow(row: any) {
     };
 }
 
-export const ToggleNode = ({ id, data }: { id: any, data: any }) => {
+function processMaxActs(row: any) {
+  let tokens: string[][] = row.tokens;
+  let values: number[][] = row.values;
+
+  const max_val = Math.max(...values.map((v: number[]) => Math.max(...v)));
+
+  tokens = tokens.reverse();
+  values = values.reverse();
+
+  return tokens.map((t: string[], i: number) => ({ tokens: t, values: values[i].map((v: number) => v / max_val) }));
+}
+
+function MaxActivatingExample({ tokens, values }: { tokens: string[], values: number[] }) {
+  return (
+      <div className="maexample" style={{
+          paddingBottom: '0.2rem',
+          paddingTop: '0.2rem',
+          borderBottom: '1px solid rgba(0, 0, 0, 0.1)',
+          fontSize: '0.6rem'
+      }}>
+          {tokens.map((token, i) => (
+              <span
+                  key={i}
+                  style={{
+                      backgroundColor: `rgba(10, 220, 100, ${values[i] * 0.6})`,
+                      display: 'inline-block',
+                      color: 'black',
+                  }}
+              >
+                  {token}
+              </span>
+          ))}
+      </div>
+  );
+}
+
+function MaxActivatingExampleContainer ({ maxacts, height}: { maxacts: MaxActs[], height: string }) {
+  return (
+      <div style={{ height: height, overflowY: 'scroll', overflowX: 'hidden' }}>
+          {maxacts.map((maxact, i) => <MaxActivatingExample key={i} tokens={maxact.tokens} values={maxact.values} />)}
+      </div>
+  );
+}
+
+interface MaxActs {
+    tokens: string[],
+    values: number[],
+};
+
+export const ToggleNode = ({ id, data }: { id: string, data: any }) => {
     const { setNodes, setEdges } = useReactFlow();
     const [explanation, setExplanation] = useState<string[] | null>(null);
     const updateNodeInternals = useUpdateNodeInternals();
+    const [maxacts, setMaxActs] = useState<MaxActs[] | null>(null); 
+    const [maxactsShown, setMaxActsShown] = useState<boolean>(false);
+    const [explanationShown, setExplanationShown] = useState<boolean>(false);
   
     const toggleEdges = () => {
       setEdges((eds) =>
@@ -105,7 +158,7 @@ export const ToggleNode = ({ id, data }: { id: any, data: any }) => {
   
     const loadExplanation = async () => {
       if (id.split(':')[0][0] !== 'e') {
-        const url = build_url(id);
+        const url = build_url(id, false);
         console.log(url);
         axios.get(url).then((response) => {
             console.log(response.data.rows[0]);
@@ -119,6 +172,19 @@ export const ToggleNode = ({ id, data }: { id: any, data: any }) => {
         } );
       }
     } 
+
+    async function loadMaxActs() {
+        const url = build_url(id, true);
+        console.log(url);
+        axios.get(url).then((response) => {
+            console.log(response.data.rows[0]);
+            const processed = processMaxActs(response.data.rows[0].row);
+            setMaxActs(processed);
+            updateNodeInternals(id);
+        }).catch((error) => {
+            console.log(error);
+        } );
+    }
   
     const featureType = data.label.split(':')[0][0];
     const colors = new Map([
@@ -134,10 +200,15 @@ export const ToggleNode = ({ id, data }: { id: any, data: any }) => {
         <Handle type="target" position={Position.Top} />
         <div className='node-insides'>
           <label style={{ color: colors.get(featureType) }}>{data.label}</label>
+          <label style={{ color: "black" }}>IE: {data.ie.toFixed(6)}</label>
           {/* <button onClick={toggleEdges}>Toggle Edges</button> */}
           <button onClick={() => data.expandNode(id)}>Expand Node</button>
-          <button onClick={loadExplanation}>Get Explanation</button>
-          {explanation && explanation.map((exp: string, i: number) => <label key={i} style={{color: "black", fontSize: "0.8rem"}}>{exp}</label>)}
+          { id.startsWith("e") ? null : explanationShown ? <button onClick={() => setExplanationShown(false)}>Hide Explanation</button> : 
+            <button onClick={() => { loadExplanation(); setExplanationShown(true); }}>Show Explanation</button> }
+          { id.startsWith("e") ? null : maxactsShown ? <button onClick={() => setMaxActsShown(false)}>Hide MaxActs</button> : 
+            <button onClick={() => { loadMaxActs(); setMaxActsShown(true); }}>Show MaxActs</button> }
+          { maxactsShown && maxacts && <MaxActivatingExampleContainer maxacts={maxacts} height="100px" /> }
+          { explanationShown && explanation && explanation.map((exp: string, i: number) => <label key={i} style={{color: "black", fontSize: "0.8rem"}}>{exp}</label>)}
         </div>
         <Handle type="source" position={Position.Bottom} />
       </div>
