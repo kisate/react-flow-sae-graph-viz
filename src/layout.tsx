@@ -8,6 +8,10 @@ export const getLayoutedElements = (
     nodes: Node[],
     edges: Edge[]
   ) => {
+
+    console.log('nodes', nodes);
+    console.log('edges', edges);
+
     // Prepare the input for d3-dag
     const nodeParents = new Map<string, string[]>();
     edges.forEach((edge) => {
@@ -47,6 +51,8 @@ export const getLayoutedElements = (
     for (const node of dag.nodes()) {
       nodeMap.set(node.data.id, { x: node.x * scale, y: node.y * scale });
     }
+
+    console.log('nodeMap', nodeMap);
   
     return {
       nodes: nodes.map((node) => {

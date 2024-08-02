@@ -3,6 +3,7 @@ import { useState } from "react";
 import { build_url }  from "./utils";
 import axios from "axios";
 import { build_dashboard_url } from "./utils";
+import './Node.css';
 
 function calculate_selection_metric(scale_tuning: any, probe_layer: number, alpha: number, required_scale: number): number[] {
     const normalized_ce = normalize(scale_tuning.crossents);
@@ -143,19 +144,7 @@ export const ToggleNode = ({ id, data }: { id: string, data: any }) => {
     const updateNodeInternals = useUpdateNodeInternals();
     const [maxacts, setMaxActs] = useState<MaxActs[] | null>(null); 
     const [maxactsShown, setMaxActsShown] = useState<boolean>(false);
-    const [explanationShown, setExplanationShown] = useState<boolean>(false);
-  
-    const toggleEdges = () => {
-      setEdges((eds) =>
-        eds.map((edge) => {
-          if (edge.source === id) {
-            return { ...edge, hidden: !edge.hidden };
-          }
-          return edge;
-        })
-      );
-    };
-  
+    const [explanationShown, setExplanationShown] = useState<boolean>(false);  
     const loadExplanation = async () => {
       if (id.split(':')[0][0] !== 'e') {
         const url = build_url(id, false);
@@ -203,6 +192,7 @@ export const ToggleNode = ({ id, data }: { id: string, data: any }) => {
           <label style={{ color: "black" }}>IE: {data.ie.toFixed(6)}</label>
           {/* <button onClick={toggleEdges}>Toggle Edges</button> */}
           <button onClick={() => data.expandNode(id)}>Expand Node</button>
+          <button onClick={() => data.expandNode(id, true)}>Expand Downstream</button>
           { id.startsWith("e") ? null : explanationShown ? <button onClick={() => setExplanationShown(false)}>Hide Explanation</button> : 
             <button onClick={() => { loadExplanation(); setExplanationShown(true); }}>Show Explanation</button> }
           { id.startsWith("e") ? null : maxactsShown ? <button onClick={() => setMaxActsShown(false)}>Hide MaxActs</button> : 

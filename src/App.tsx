@@ -8,8 +8,6 @@ import {
   useReactFlow,
   Node,
   Edge,
-  Handle,
-  Position,
   MarkerType,
 } from '@xyflow/react';
 
@@ -20,8 +18,24 @@ import '@xyflow/react/dist/style.css';
 import './App.css';
 import { ToggleNode } from './Node';
 
+interface VirualNode {
+  id: string;
+  hidden: boolean;
+  data: any;
+}
 
-const handleOrphans = (nodes: Node[], edges: Edge[]) => {
+interface VirtualEdge {
+  id: string;
+  source: string;
+  target: string;
+  hidden: boolean;
+  underThreshold: boolean;
+  data: any;
+  style: any;
+}
+
+
+const handleOrphans = (nodes: VirualNode[], edges: VirtualEdge[]) => {
   // @ts-ignore
   const edgeIds = new Set(edges.filter((edge) => !edge.hidden && !edge.underThreshold).flatMap((edge) => [edge.source, edge.target]));
 
@@ -34,6 +48,42 @@ const handleOrphans = (nodes: Node[], edges: Edge[]) => {
       return { ...node, hidden: false };
     }
   });
+}
+
+function partiallyLayout(newFlowNodes: Node[], newFlowEdges: Edge[], centerNode: Node, oldNodes: Node[]) {
+  const oldNodeIds = new Set(oldNodes.map((node) => node.id));
+  const addedNodes = newFlowNodes.filter((node) => !oldNodeIds.has(node.id));
+
+  addedNodes.push(centerNode);
+
+  const addedNodeIds = new Set(addedNodes.map((node) => node.id));
+
+  if (addedNodeIds.size === 1) {
+    return oldNodes;
+  }
+
+
+  let updatedNodes = getLayoutedElements(newFlowNodes, newFlowEdges).nodes;
+
+  const deltaX = centerNode.position.x - updatedNodes.find((n) => n.id === centerNode.id)!.position.x;
+  const deltaY = centerNode.position.y - updatedNodes.find((n) => n.id === centerNode.id)!.position.y;
+
+  const updatedNodesMap = new Map(updatedNodes.filter((node) => addedNodeIds.has(node.id)).map((node) => [node.id, node]));
+
+  console.log("updatedNodes", updatedNodesMap);
+
+  const finalNewFlowNodes = newFlowNodes.map((node) => {
+    const updatedNode = updatedNodesMap.get(node.id);
+    if (updatedNode) {
+      return { ...node, position: { x: updatedNode.position.x + deltaX, y: updatedNode.position.y + deltaY } };
+    } else {
+      return node;
+    }
+  } );
+
+  console.log("finalNewFlowNodes", finalNewFlowNodes);
+
+  return finalNewFlowNodes
 }
 
 
@@ -49,11 +99,11 @@ const LayoutFlow: React.FC = () => {
   const { fitView } = useReactFlow();
   const reactFlow = useReactFlow();
 
-  const [allNodes, setAllNodes] = useState<Node[]>([]);
-  const [allEdges, setAllEdges] = useState<Edge[]>([]);
+  const [virtualNodes, setVirtualNodes] = useState<VirualNode[]>([]);
+  const [virtualEdges, setVirtualEdges] = useState<VirtualEdge[]>([]);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(allNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(allEdges);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [centerNode, setCenterNode] = useState<string | null>(null);
   const [ieThreshold, setIeThreshold] = useState<number>(0.5);
   const [layoutUpdated, setLayoutUpdated] = useState(true);
@@ -66,7 +116,6 @@ const LayoutFlow: React.FC = () => {
       const node = nodes.find((node) => node.id === centerNode);
       if (node) {
         const viewport = reactFlow.getViewport();
-        console.log("!!!!!")
         console.log(node);
         reactFlow.setCenter(node.position.x, node.position.y, { zoom: viewport.zoom });
       }
@@ -88,11 +137,13 @@ const LayoutFlow: React.FC = () => {
     [nodes, edges, fitView, setNodes, setEdges]
   );
 
-  const expandNode = (node: string) => {
-    console.log(node);
-    setAllEdges((edges) => {
+  const expandNode = (node: string, downStreamOnly: boolean = false) => {
+    console.log(node, downStreamOnly);
+    setVirtualEdges((edges) => {
       const newEdges = edges.map((e) => {
-        if (e.source === node || e.target === node) {
+        if (!downStreamOnly && (e.source === node || e.target === node)) {
+          return { ...e, hidden: false };
+        } else if (downStreamOnly && e.source === node) {
           return { ...e, hidden: false };
         } else {
           return { ...e };
@@ -101,19 +152,37 @@ const LayoutFlow: React.FC = () => {
 
 
       // @ts-ignore
-      setEdges(newEdges.filter((edge) => !edge.hidden && !edge.underThreshold));
+      let newFlowEdges = newEdges.filter((edge) => !edge.hidden && !edge.underThreshold);
+      
+      setEdges(newFlowEdges);
 
-      setAllNodes((nodes) => {
-        let newNodes = handleOrphans(nodes, newEdges);
-        setNodes(newNodes.filter((node) => !node.hidden));
-        setLayoutUpdated(false);
-        return newNodes;
+      setVirtualNodes((nodes) => {
+        let newVirtualNodes = handleOrphans(nodes, newEdges);
+        const newFlowNodes = newVirtualNodes.filter((node) => !node.hidden).map((node) => {
+          const existingNode = reactFlow.getNode(node.id);
+          if (existingNode) {
+            return existingNode;
+          }
+          return { ...node, position: { x: 0, y: 0 } };
+        })
+
+        setNodes((oldNodes) => {
+
+          const expandedNode = newFlowNodes.find((n) => n.id === node)!;
+
+          const finalNewFlowNodes = partiallyLayout(newFlowNodes, newFlowEdges, expandedNode, oldNodes);
+
+          return finalNewFlowNodes
+        });
+        // setLayoutUpdated(false);
+        return newVirtualNodes;
       });
 
       return newEdges;
     });
 
     setCenterNode(node);
+    // setCentered(false);
   }
 
   const handleSubmit = (event: any) => {
@@ -182,7 +251,7 @@ const LayoutFlow: React.FC = () => {
             type: 'toggleNode',
             data: { label: node, expandNode: expandNode, ie: newNodeIEs.get(node) || 0 },
             hidden: true,
-            position: { x: layerNodeCounter.get(layer)! * 100, y: layer * 400 },
+            position: { x: 0, y: 0 },
           };
 
           layerNodeCounter.set(layer, layerNodeCounter.get(layer)! + 1);
@@ -194,7 +263,7 @@ const LayoutFlow: React.FC = () => {
 
 
         console.log(graph);
-        const threshold = graph[3 * newNodes.length][0];
+        const threshold = graph[2 * newNodes.length][0];
 
         newEdges = newEdges.map((edge: any) => {
           return {
@@ -203,8 +272,8 @@ const LayoutFlow: React.FC = () => {
           }
         });
 
-        setAllNodes(newNodes);
-        setAllEdges(newEdges);
+        setVirtualNodes(newNodes);
+        setVirtualEdges(newEdges);
 
         setNodes(newNodes.filter((node) => !node.hidden).map((node) => {
           const existingNode = reactFlow.getNode(node.id);
@@ -250,28 +319,34 @@ const LayoutFlow: React.FC = () => {
   }
   
   useEffect(() => {
-    setAllEdges((edges) => {
+    setVirtualEdges((edges) => {
       const newEdges = edges.map((edge: any) => {
         return { 
           ...edge, 
           underThreshold: edge.data.weight < ieThreshold,
           style: { strokeWidth: 10 * (Math.log(edge.data.weight) - Math.log(ieThreshold)) / (Math.log(maxWeight) - Math.log(ieThreshold)) }
         };
-      });
+      }); 
 
-      setEdges(newEdges.filter((edge) => !edge.hidden && !edge.underThreshold));
+      let newFlowEdges = newEdges.filter((edge) => !edge.hidden && !edge.underThreshold);
 
-      setAllNodes((nodes) => {
+      setEdges(newFlowEdges);
+
+      setVirtualNodes((nodes) => {
         const newNodes = handleOrphans(nodes, newEdges);
 
-        setNodes(newNodes.filter((node) => !node.hidden).map((node) => {
-          const existingNode = reactFlow.getNode(node.id);
-          if (existingNode) {
-            return existingNode;
-          }
-          return node;
-        }));
-        return newNodes;
+        setNodes((oldNodes) => {
+          const newFlowNodes =newNodes.filter((node) => !node.hidden).map((node) => {
+            const existingNode = reactFlow.getNode(node.id);
+            if (existingNode) {
+              return existingNode;
+            }
+            return { ...node, position: { x: 0, y: 0 } };
+          })
+
+          return newFlowNodes
+        } );
+          return newNodes;
       });
       // setLayoutUpdated(false);
       // setShouldCenter(false);
