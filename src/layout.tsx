@@ -44,12 +44,13 @@ export const getLayoutedElements = (
   
     layout(dag);
   
-    const scale = 100;
+    const xScale = 100;
+    const yScale = 150;
   
     // Extract the layout information
     const nodeMap = new Map();
     for (const node of dag.nodes()) {
-      nodeMap.set(node.data.id, { x: node.x * scale, y: node.y * scale });
+      nodeMap.set(node.data.id, { x: node.x * xScale, y: node.y * yScale });
     }
 
     console.log('nodeMap', nodeMap);

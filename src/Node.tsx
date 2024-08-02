@@ -191,8 +191,9 @@ export const ToggleNode = ({ id, data }: { id: string, data: any }) => {
           <label style={{ color: colors.get(featureType) }}>{data.label}</label>
           <label style={{ color: "black" }}>IE: {data.ie.toFixed(6)}</label>
           {/* <button onClick={toggleEdges}>Toggle Edges</button> */}
-          <button onClick={() => data.expandNode(id)}>Expand Node</button>
-          <button onClick={() => data.expandNode(id, true)}>Expand Downstream</button>
+          <button onClick={() => data.expandNode(id, "all")}>Expand Node</button>
+          <button onClick={() => data.expandNode(id, "upstream")}>Expand Upstream</button>
+          <button onClick={() => data.expandNode(id, "downstream")}>Expand Downstream</button>
           { id.startsWith("e") ? null : explanationShown ? <button onClick={() => setExplanationShown(false)}>Hide Explanation</button> : 
             <button onClick={() => { loadExplanation(); setExplanationShown(true); }}>Show Explanation</button> }
           { id.startsWith("e") ? null : maxactsShown ? <button onClick={() => setMaxActsShown(false)}>Hide MaxActs</button> : 

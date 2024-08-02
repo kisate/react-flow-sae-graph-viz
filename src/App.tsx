@@ -137,19 +137,26 @@ const LayoutFlow: React.FC = () => {
     [nodes, edges, fitView, setNodes, setEdges]
   );
 
-  const expandNode = (node: string, downStreamOnly: boolean = false) => {
-    console.log(node, downStreamOnly);
+  const expandNode = (node: string, mode: string = "all") => {
+    console.log(node, mode);
     setVirtualEdges((edges) => {
       const newEdges = edges.map((e) => {
-        if (!downStreamOnly && (e.source === node || e.target === node)) {
-          return { ...e, hidden: false };
-        } else if (downStreamOnly && e.source === node) {
-          return { ...e, hidden: false };
-        } else {
-          return { ...e };
-        }
-      })
 
+        if (mode == "all") {
+          if (e.source === node || e.target === node) {
+            return { ...e, hidden: false };
+          }
+        } else if (mode == "downstream") {
+          if (e.source === node) {
+            return { ...e, hidden: false };
+          }
+        } else if (mode == "upstream") {
+          if (e.target === node) {
+            return { ...e, hidden: false };
+          }
+        }
+        return e;
+      });
 
       // @ts-ignore
       let newFlowEdges = newEdges.filter((edge) => !edge.hidden && !edge.underThreshold);
