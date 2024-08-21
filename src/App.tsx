@@ -17,6 +17,7 @@ import '@xyflow/react/dist/style.css';
 
 import './App.css';
 import { ToggleNode } from './Node';
+import { NodeSelector } from './components/NodeSelector';
 
 interface VirualNode {
   id: string;
@@ -95,6 +96,10 @@ function nodeKeysToName(keys: string[]) {
   return keys.join(':');
 }
 
+function getMax(arr: any[]) {
+  return arr.reduce((max, v) => max >= v ? max : v, -Infinity);
+}
+
 const LayoutFlow: React.FC = () => {
   const { fitView } = useReactFlow();
   const reactFlow = useReactFlow();
@@ -109,7 +114,8 @@ const LayoutFlow: React.FC = () => {
   const [layoutUpdated, setLayoutUpdated] = useState(true);
   const [centered, setCentered] = useState(true);
   const [maxWeight, setMaxWeight] = useState(0);
-  const [nodeIEs, setNodeIEs] = useState(new Map<string, number>());
+  const [nodeIEs, setNodeIEs] = useState <Map<string, number> | null> (null);
+  const [firstNodeSelected, setFirstNodeSelected] = useState(false);
 
   function centerOnNode() {
     if (centerNode) {
@@ -215,7 +221,7 @@ const LayoutFlow: React.FC = () => {
         console.log(graph);
 
 
-        const maxWeight = Math.max(...graph.map((edge: any) => edge[0]));
+        const maxWeight = getMax(graph.map((edge: any) => edge[0]));
 
         let newEdges = graph.map((edge: any) => {
           const source = nodeKeysToName(edge[1]);
@@ -270,26 +276,20 @@ const LayoutFlow: React.FC = () => {
 
 
         console.log(graph);
-        const threshold = graph[2 * newNodes.length][0];
+        const threshold = graph[  newNodes.length][0];
 
         newEdges = newEdges.map((edge: any) => {
           return {
             ...edge,
-            style: { strokeWidth: 10 * (Math.log(edge.data.weight) - Math.log(threshold)) / (Math.log(maxWeight) - Math.log(threshold)) }
+            style: { strokeWidth: 10 * (Math.log(   edge.data.weight) - Math.log(threshold)) / (Math.log(maxWeight) - Math.log(threshold)) }
           }
         });
 
         setVirtualNodes(newNodes);
         setVirtualEdges(newEdges);
 
-        setNodes(newNodes.filter((node) => !node.hidden).map((node) => {
-          const existingNode = reactFlow.getNode(node.id);
-          if (existingNode) {
-            return existingNode;
-          }
-          return node;
-        }));
-        setEdges(newEdges.filter((edge: any) => !edge.hidden));
+        console.log(newNodes);
+        console.log(newEdges);
 
         setIeThreshold(threshold);
         setMaxWeight(maxWeight);
@@ -311,6 +311,12 @@ const LayoutFlow: React.FC = () => {
     if (node) {
       expandNode(node);
     }
+  }
+
+  const handleFirstNodeSelect = (nodeId: string) => { 
+    setFirstNodeSelected(true);
+    expandNode(nodeId);
+    setLayoutUpdated(false);
   }
 
   const handleSearchNode = (event: any) => {
@@ -377,7 +383,9 @@ const LayoutFlow: React.FC = () => {
     }
   }, [nodes, centered]);
 
-  return (
+  return !firstNodeSelected && nodeIEs !== null ? 
+  <NodeSelector nodeIes={nodeIEs} onSelectNode={handleFirstNodeSelect} /> :
+  (
     <ReactFlow
       nodes={nodes}
       edges={edges}
