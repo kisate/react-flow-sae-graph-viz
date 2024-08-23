@@ -106,6 +106,7 @@ const LayoutFlow: React.FC = () => {
 
   const [virtualNodes, setVirtualNodes] = useState<VirualNode[]>([]);
   const [virtualEdges, setVirtualEdges] = useState<VirtualEdge[]>([]);
+  const [IEsLoading, setIEsLoading] = useState(false);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -199,7 +200,6 @@ const LayoutFlow: React.FC = () => {
   }
 
   const handleSubmit = (event: any) => {
-    event.preventDefault();
     const data = new FormData(event.target);
     const file = data.get('file') as File;
 
@@ -302,6 +302,7 @@ const LayoutFlow: React.FC = () => {
       };
       reader.readAsText(file);
     }
+    setIEsLoading(false);
   }
 
   const handleNodeSelect = (event: any) => {
@@ -383,7 +384,7 @@ const LayoutFlow: React.FC = () => {
     }
   }, [nodes, centered]);
 
-  return !firstNodeSelected && nodeIEs !== null ? 
+  return IEsLoading ? <p>Loading graph...</p> : !firstNodeSelected && nodeIEs !== null ? 
   <NodeSelector nodeIes={nodeIEs} onSelectNode={handleFirstNodeSelect} /> :
   (
     <ReactFlow
@@ -392,13 +393,14 @@ const LayoutFlow: React.FC = () => {
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       fitView
+      minZoom={0.0001}
       nodeTypes={nodeTypes}
     >
       <Panel position="top-right">
         <button onClick={() => {
           setLayoutUpdated(false);
           }}>layout</button>
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={e => {e.preventDefault(); setIEsLoading(true); setTimeout(() => handleSubmit(e), 0)}}>
           <input type="file" name="file" accept=".json" />
           <button type="submit">Load Graph</button>
         </form>
@@ -407,13 +409,14 @@ const LayoutFlow: React.FC = () => {
           <button type="submit">Show Node</button>
         </form>
         <form>
-          <input type="number" value={ieThreshold} onChange={(event) => setIeThreshold(parseFloat(event.target.value))} step="0.0000001" />
+          <input type="number" value={ieThreshold} onChange={(event) => setTimeout(() => setIeThreshold(parseFloat(event.target.value)))} step="0.0000001" />
         </form>
         <button onClick={centerOnNode}>Center on Node</button>
         <form onSubmit={handleSearchNode}>
           <input type="text" name="text" />
           <button type="submit">Search Node</button>
         </form>
+        {nodeIEs !== null ? <button onClick={() => {setFirstNodeSelected(false)}}>Back to overview</button> : null}
       </Panel>
     </ReactFlow>
   );
