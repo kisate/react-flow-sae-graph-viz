@@ -100,6 +100,39 @@ function getMax(arr: any[]) {
   return arr.reduce((max, v) => max >= v ? max : v, -Infinity);
 }
 
+function makeNodeTokens(node: string, tokens: string[][], positionMaps: Map<string, Object>) {
+  const nodeData = node.split(':');
+  // const position = parseInt(nodeData[nodeData.length - 1]);
+  const partialNode = nodeData.slice(0, -1).join(':');
+
+  function mapToValue(node:string, idx:number) {
+    const positionMap = new Map(Object.entries(positionMaps.get(partialNode)!));
+    
+    const value = positionMap.get(idx.toString());
+
+    return value ? value : 0;
+  }
+
+  const values = tokens.map((batch_tokens) => {
+    return batch_tokens.map((token, i) =>mapToValue(node, i));
+  });
+
+  const windowSize = 2;
+
+  const start = Math.max(0);
+  const end = Math.min(tokens[0].length);
+  
+
+  const nodeTokens = tokens.map((batch_tokens) => {
+    return batch_tokens.slice(start, end)
+  } );
+  const nodeValues = values.map((batch_values) => {
+    return batch_values.slice(start, end);
+  });
+
+  return [nodeTokens, nodeValues];
+}
+
 const LayoutFlow: React.FC = () => {
   const { fitView } = useReactFlow();
   const reactFlow = useReactFlow();
@@ -211,15 +244,23 @@ const LayoutFlow: React.FC = () => {
 
         const graph = parsedJSON.edges;
         const newNodeIEs = new Map<string, number>(parsedJSON.nodes.map((entry: any) => {
-          const nodeId = nodeKeysToName(entry.slice(0, 4));
-          const ie = entry[4];
+          const nodeId = nodeKeysToName(entry.slice(0, -1));
+          const ie = entry[entry.length-1];
           return [nodeId, ie];
         }));
 
         setNodeIEs(newNodeIEs);
 
-        console.log(graph);
+        const tokenList = parsedJSON.tokens;
 
+
+        let positionMaps = parsedJSON.position_maps;
+
+        if (positionMaps) {
+          positionMaps = new Map(Object.entries(positionMaps));
+        }
+
+        console.log(positionMaps)
 
         const maxWeight = getMax(graph.map((edge: any) => edge[0]));
 
@@ -259,10 +300,18 @@ const LayoutFlow: React.FC = () => {
 
         const newNodes = allNewNodes.map((node: any) => {
           const layer = node.split(':')[1];
+          
+          const nodeTokens = tokenList ? makeNodeTokens(node, tokenList, positionMaps) : null;
+          
           const nodeData = {
             id: node,
             type: 'toggleNode',
-            data: { label: node, expandNode: expandNode, ie: newNodeIEs.get(node) || 0 },
+            data: { 
+              label: node, 
+              expandNode: expandNode, 
+              ie: newNodeIEs.get(node) || 0,
+              tokens: nodeTokens
+            },
             hidden: true,
             position: { x: 0, y: 0 },
           };
@@ -276,7 +325,8 @@ const LayoutFlow: React.FC = () => {
 
 
         console.log(graph);
-        const threshold = graph[  newNodes.length][0];
+        // const threshold = graph[  newNodes.length][0];
+        const threshold = 0;
 
         newEdges = newEdges.map((edge: any) => {
           return {
@@ -298,7 +348,7 @@ const LayoutFlow: React.FC = () => {
 
         console.log(firstNode);
 
-        expandNode(nodeKeysToName(firstNode.slice(0, 4)));
+        expandNode(nodeKeysToName(firstNode.slice(0, -1)));
       };
       reader.readAsText(file);
     }

@@ -101,7 +101,12 @@ function processMaxActs(row: any) {
   return tokens.map((t: string[], i: number) => ({ tokens: t, values: values[i].map((v: number) => v / max_val) }));
 }
 
-function MaxActivatingExample({ tokens, values }: { tokens: string[], values: number[] }) {
+function idToPosition(id: string): number {
+    const split = id.split(':');
+    return parseInt(split[split.length - 1]);
+    }
+
+function MaxActivatingExample({ tokens, values, target }: { tokens: string[], values: number[], target?: number }) {
   return (
       <div className="maexample" style={{
           paddingBottom: '0.2rem',
@@ -113,9 +118,10 @@ function MaxActivatingExample({ tokens, values }: { tokens: string[], values: nu
               <span
                   key={i}
                   style={{
-                      backgroundColor: `rgba(10, 220, 100, ${values[i] * 0.6})`,
+                      backgroundColor: i === target ? `rgba(52, 225, 235, ${values[i] * 0.6})` :`rgba(10, 220, 100, ${values[i] * 0.6})`,
                       display: 'inline-block',
                       color: 'black',
+                    //   fontWeight: i === target ? 'bold' : 'normal',
                   }}
               >
                   {token}
@@ -125,10 +131,10 @@ function MaxActivatingExample({ tokens, values }: { tokens: string[], values: nu
   );
 }
 
-function MaxActivatingExampleContainer ({ maxacts, height}: { maxacts: MaxActs[], height: string }) {
+function MaxActivatingExampleContainer ({ maxacts, height, target}: { maxacts: MaxActs[], height: string, target?: number }) {
   return (
       <div style={{ height: height, overflowY: 'scroll', overflowX: 'hidden' }}>
-          {maxacts.map((maxact, i) => <MaxActivatingExample key={i} tokens={maxact.tokens} values={maxact.values} />)}
+          {maxacts.map((maxact, i) => <MaxActivatingExample key={i} tokens={maxact.tokens} values={maxact.values} target={target} />)}
       </div>
   );
 }
@@ -138,6 +144,8 @@ interface MaxActs {
     values: number[],
 };
 
+
+
 export const ToggleNode = ({ id, data }: { id: string, data: any }) => {
     const { setNodes, setEdges } = useReactFlow();
     const [explanation, setExplanation] = useState<string[] | null>(null);
@@ -145,6 +153,7 @@ export const ToggleNode = ({ id, data }: { id: string, data: any }) => {
     const [maxacts, setMaxActs] = useState<MaxActs[] | null>(null); 
     const [maxactsShown, setMaxActsShown] = useState<boolean>(false);
     const [explanationShown, setExplanationShown] = useState<boolean>(false);  
+    const [tokensShown, setTokensShown] = useState<boolean>(false);
     const loadExplanation = async () => {
       if (id.split(':')[0][0] !== 'e') {
         const url = build_url(id, false);
@@ -194,12 +203,14 @@ export const ToggleNode = ({ id, data }: { id: string, data: any }) => {
           <button onClick={() => data.expandNode(id, "all")}>Expand Node</button>
           <button onClick={() => data.expandNode(id, "upstream")}>Expand Upstream</button>
           <button onClick={() => data.expandNode(id, "downstream")}>Expand Downstream</button>
+          { data.tokens && <button onClick={() => {setTokensShown(!tokensShown); console.log(data.tokens)}}>Toggle Tokens</button> }
           { id.startsWith("e") ? null : explanationShown ? <button onClick={() => setExplanationShown(false)}>Hide Explanation</button> : 
             <button onClick={() => { loadExplanation(); setExplanationShown(true); }}>Show Explanation</button> }
           { id.startsWith("e") ? null : maxactsShown ? <button onClick={() => setMaxActsShown(false)}>Hide MaxActs</button> : 
             <button onClick={() => { loadMaxActs(); setMaxActsShown(true); }}>Show MaxActs</button> }
           { maxactsShown && maxacts && <MaxActivatingExampleContainer maxacts={maxacts} height="100px" /> }
           { explanationShown && explanation && explanation.map((exp: string, i: number) => <label key={i} style={{color: "black", fontSize: "0.8rem"}}>{exp}</label>)}
+          { tokensShown && <MaxActivatingExampleContainer maxacts={data.tokens[0].map((t: string, i: number) => ({ tokens: t, values: data.tokens[1]![i] }))} height="30px" target= {idToPosition(id)}/> }
         </div>
         <Handle type="source" position={Position.Bottom} />
       </div>
